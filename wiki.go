@@ -43,14 +43,41 @@ func loadPage(title string) (*Page, error) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "Hi there, you're here:%s", r.URL.Path[1:])
-}
+    res := "<h1>Welcome to GoWiki</h1> <br> Available files:"
 
-func viewHandler(w http.ResponseWriter, r *http.Request) {
-    title, err := getTitle(w, r)
+    dir, err := os.ReadDir(".")
     if err != nil {
+        fmt.Println("Error while reading dir:", err)
         return
     }
+
+    for _, file := range dir {
+        // checks for txt file
+        if file.Name()[len(file.Name())-3:] == "txt" {
+            fmt.Println(file.Name())
+            res += fmt.Sprintf("<br> <a href=%s>%s</a>", "/view/"+file.Name(), file.Name()[:len(file.Name())-3])
+        }
+    }
+
+    fmt.Fprintf(w, res)
+}
+
+// wrapper takes in a function that takes res, req, str as function arg; returns a handler that
+// takes in res, req
+func makeHandler(fn func (http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // extract title from Req; call the handler fn.
+        m := validPath.FindStringSubmatch(r.URL.Path)
+        fmt.Println(m)
+        if m == nil {
+            http.NotFound(w, r)
+            return
+        }
+        fn(w, r, m[2])
+    }
+}
+
+func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
     p, err := loadPage(title)
     if err != nil {
         http.Redirect(w, r, "/edit/"+title, http.StatusFound)
@@ -58,31 +85,19 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
     renderTemplate(w, "view", p)
 }
 
-func editHandler(w http.ResponseWriter, r *http.Request) {
-    title, err := getTitle(w, r)
-    if err != nil {
-        return
-    }
+func editHandler(w http.ResponseWriter, r *http.Request, title string) {
     p, err := loadPage(title)
     if err != nil {
         // if page doesn't exist (hence nil), create a Page using the supplied title.
         p = &Page{Title: title} // Body takes the default value of ""
     }
-    if err != nil {
-        // if file doesn't exist, create it
-        p = &Page{Title: title}
-    }
     renderTemplate(w, "edit", p)
 }
 
-func saveHandler(w http.ResponseWriter, r *http.Request) {
-    title, err := getTitle(w, r)
-    if err != nil {
-        return
-    }
+func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
     body := r.FormValue("body")
     p := &Page{Title: title, Body: []byte(body)}
-    err = p.save()
+    err := p.save()
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
@@ -99,8 +114,8 @@ func renderTemplate(w http.ResponseWriter, templ string, p *Page) {
 
 func main() {
     http.HandleFunc("/", handler)
-    http.HandleFunc("/view/", viewHandler)
-    http.HandleFunc("/edit/", editHandler)
-    http.HandleFunc("/save/", saveHandler)
+    http.HandleFunc("/view/", makeHandler(viewHandler))
+    http.HandleFunc("/edit/", makeHandler(editHandler))
+    http.HandleFunc("/save/", makeHandler(saveHandler))
     log.Fatal(http.ListenAndServe(":8080", nil))
 }
